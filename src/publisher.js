@@ -2,7 +2,9 @@
 
 const throughConcurrent = require('through2-concurrent');
 
-const compress = require('./compressor');
+const brotli = require('./compression/brotli');
+const gzip = require('./compression/gzip');
+const isCompressibleFile = require('./compression/is-compressible');
 const optionsProvider = require('./optionsProvider');
 const optionsValidator = require('./optionsValidator');
 const overwrite = require('./overwrite');
@@ -20,37 +22,51 @@ function helper(opts, initialPath) {
 				uploadPath: options.getUploadPath()
 			};
 
-			const compressionTransform = getCompressionTransform();
+			const brotliTransform = getBrotliTransform();
+			const gzipTransform = getGzipTransform();
 			const otherTransform = getOtherTransform();
 
 			const overwriteCheck = overwrite(options);
-			return throughConcurrent.obj(/* @this */ function(file, _, cb) {
-				overwriteCheck().then(() => {
+			return throughConcurrent.obj(/* @this */ async function(file, _, cb) {
+				try {
+					await overwriteCheck();
+
 					if (file.base[file.base.length - 1] === '/') {
 						file.base = file.base.substring(0, file.base.length - 1);
 					}
 
-					const push = file => {
-						this.push(file);
-						cb();
-					};
-
-					if (compress._isCompressibleFile(file)) {
-						return compressionTransform(file).then(push, cb);
+					if (isCompressibleFile(file)) {
+						this.push(await brotliTransform(file));
+						this.push(await gzipTransform(file));
+					} else {
+						this.push(await otherTransform(file));
 					}
 
-					otherTransform(file).then(push, cb);
-				}, cb);
+					cb();
+				} catch (err) {
+					cb(err);
+				}
 			}).resume();
 
-			function getCompressionTransform() {
+			function getBrotliTransform() {
+				const s3Options = JSON.parse(JSON.stringify(s3BaseOptions));
+				s3Options.headers['content-encoding'] = 'br';
+
+				const upload = s3(options.getCreds(), s3Options);
+
+				return async function brotliTransform(file) {
+					return upload(await brotli(file));
+				};
+			}
+
+			function getGzipTransform() {
 				const s3Options = JSON.parse(JSON.stringify(s3BaseOptions));
 				s3Options.headers['content-encoding'] = 'gzip';
 
 				const upload = s3(options.getCreds(), s3Options);
 
-				return function compressionTransform(file) {
-					return compress(file).then(upload);
+				return function gzipTransform(file) {
+					return gzip(file).then(upload);
 				};
 			}
 

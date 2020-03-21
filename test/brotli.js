@@ -6,13 +6,13 @@ var fs = require('fs'),
 var through = require('through2'),
 	vfs = require('vinyl-fs');
 
-var compressor = require('../src/compressor');
+var brotli = require('../src/compression/brotli');
 
-describe('compressor', function() {
+describe('brotli', function() {
 
 	function compressionStream() {
 		return through.obj(/* @this */function(file, _, cb) {
-			compressor(file).then(file => {
+			brotli(file).then(file => {
 				this.push(file);
 				cb();
 			}, cb);
@@ -49,33 +49,6 @@ describe('compressor', function() {
 				expect(file.contents.length).to.equal(originalSize);
 				done();
 			});
-
-	});
-
-	describe('mocked zlib', function() {
-
-		var error = new Error('oh no');
-		var zlib = require('zlib');
-
-		beforeEach(function() {
-			zlib._gzip = zlib.gzip;
-			zlib.gzip = function(contents, options, cb) {
-				cb(error);
-			};
-		});
-
-		afterEach(function() {
-			zlib.gzip = zlib._gzip;
-		});
-
-		it('should pass along errors from zlib', function(done) {
-			vfs.src('./test/support/file.js')
-				.pipe(compressionStream())
-				.on('error', function(err) {
-					expect(err).to.equal(error);
-					done();
-				});
-		});
 
 	});
 
